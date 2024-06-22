@@ -50,22 +50,44 @@ fn average_tensor_on_axis(tensor: &Tensor, axis: usize) -> Tensor {
     tensor.mean(axis).expect("Failed to calculate mean")
 }
 
-fn mnist_distance(a: &Tensor, b: &Tensor) -> f32 {
+fn mnist_distance(a: &Tensor, b: &Tensor) -> Tensor {
     let result = a.broadcast_sub(b).expect("Failed to broadcast subtraction");
     let abs_result = result.abs().expect("Failed to calculate absolute value");
 
+    let last_axis_index = result.dims().len() - 1;
+    let second_last_axis_index = result.dims().len() - 2;
+
     abs_result
-        .mean_all()
+        .mean((second_last_axis_index, last_axis_index))
         .expect("Failed to calculate mean")
-        .to_vec0::<f32>()
-        .unwrap()
 }
 
-fn is_a_three(test_tensor: &Tensor, ideal_tensor: &Tensor, threshhold_tensor: &Tensor) -> bool {
+fn is_a_three(test_tensor: &Tensor, ideal_tensor: &Tensor, threshhold_tensor: &Tensor) -> Tensor {
     let proximity_to_ideal = mnist_distance(test_tensor, ideal_tensor);
     let proximity_to_threshold = mnist_distance(test_tensor, threshhold_tensor);
 
-    proximity_to_ideal < proximity_to_threshold
+    proximity_to_ideal
+        .lt(&proximity_to_threshold)
+        .expect("Failed to compare tensors")
+        .to_dtype(candle_core::DType::F32)
+        .expect("Failed to convert tensor to f32")
+}
+
+fn accuracy_measure(matching_set_eval: &Tensor, mismatching_set_eval: &Tensor) -> f32 {
+    let matching_set_average = matching_set_eval
+        .mean_all()
+        .expect("Failed to calculate mean")
+        .to_vec0::<f32>()
+        .expect("Failed to convert tensor to f32");
+
+    let mismatching_set_average = 1.0
+        - mismatching_set_eval
+            .mean_all()
+            .expect("Failed to calculate mean")
+            .to_vec0::<f32>()
+            .expect("Failed to convert tensor to f32");
+
+    (matching_set_average + mismatching_set_average) / 2.0
 }
 
 fn main() -> anyhow::Result<()> {
@@ -105,8 +127,15 @@ fn main() -> anyhow::Result<()> {
     let valid_seven_mnist_distance = mnist_distance(&valid_stacked_seven_tensor, &ideal_seven);
     dbg!(valid_three_mnist_distance, valid_seven_mnist_distance);
 
-    // Calculate the accuracy on the validation set
-    let diff = is_a_three(sample_three, &ideal_three, &ideal_seven);
-    dbg!(diff);
+    // Check if the sample is a three
+    let test_a_three = is_a_three(sample_three, &ideal_three, &ideal_seven);
+    dbg!(test_a_three.to_scalar::<f32>().unwrap() == 1.0);
+
+    // Check if the validation set is a three
+    let three_training_run = is_a_three(&valid_stacked_three_tensor, &ideal_three, &ideal_seven);
+    let seven_training_run = is_a_three(&valid_stacked_seven_tensor, &ideal_three, &ideal_seven);
+
+    dbg!(accuracy_measure(&three_training_run, &seven_training_run));
+
     Ok(())
 }
