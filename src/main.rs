@@ -27,38 +27,51 @@ fn tensor_from_image(img_path: &str) -> anyhow::Result<Tensor> {
     Ok(img_ten)
 }
 
+fn transform_dir_into_tensors(dir_path: &str) -> Vec<Tensor> {
+    dir_walk(dir_path)
+        .expect("Failed to read directory")
+        .into_iter()
+        .map(|path| {
+            tensor_from_image(&path)
+                .expect("Failed to convert image")
+                .to_dtype(candle_core::DType::F32)
+                .expect("Failed to convert tensor to f32")
+        })
+        .collect()
+}
+
+fn stack_tensors_on_axis(tensor_list: &[Tensor], axis: usize) -> Tensor {
+    Tensor::stack(tensor_list, axis)
+        .expect("Failed to stack tensors on dimension")
+        .to_dtype(candle_core::DType::F32)
+        .expect("Failed to convert tensor to f32")
+}
+
+fn average_tensor_on_axis(tensor: Tensor, axis: usize) -> Tensor {
+    tensor.mean(axis).expect("Failed to calculate mean")
+}
+
 fn main() -> anyhow::Result<()> {
     // Get the images from the directories and convert them to tensors
-    let threes_dir: Vec<Tensor> = dir_walk("dataset/training/3")?
-        .into_iter()
-        .map(|path| tensor_from_image(&path).expect("Failed to convert image"))
-        .collect();
-
-    let sevens_dir: Vec<Tensor> = dir_walk("dataset/training/7")?
-        .into_iter()
-        .map(|path| tensor_from_image(&path).expect("Failed to convert image"))
-        .collect();
+    let threes_tensor_list = transform_dir_into_tensors("dataset/training/3");
+    let sevens_tensor_list = transform_dir_into_tensors("dataset/training/7");
 
     // Stack tensors on one axis
-    let threes = Tensor::stack(&threes_dir, 0)?
-        .to_dtype(candle_core::DType::F32)
-        .unwrap();
-
-    let sevens = Tensor::stack(&sevens_dir, 0)?
-        .to_dtype(candle_core::DType::F32)
-        .unwrap();
+    let stacked_three_tensor = stack_tensors_on_axis(&threes_tensor_list, 0); // 3 x 28 x 28
+    let stacked_seven_tensor = stack_tensors_on_axis(&sevens_tensor_list, 0); // 7 x 28 x 28
 
     // Calculate the ideal shape of the digit by averaging the stack of all the digits on the first axis
-    let _ideal_three = threes.mean(0).unwrap();
-    let ideal_seven = sevens.mean(0).unwrap();
+    let ideal_three = average_tensor_on_axis(stacked_three_tensor, 0);
+    let ideal_seven = average_tensor_on_axis(stacked_seven_tensor, 0);
 
     // Get the first sample from each directory as a tensor
-    let sample_three = &threes_dir[0].to_dtype(candle_core::DType::F32).unwrap();
-    let _sample_seven = &sevens_dir[0].to_dtype(candle_core::DType::F32).unwrap();
+    let sample_three = &threes_tensor_list[0];
+    let sample_seven = &sevens_tensor_list[0];
 
     // Calculate the loss between the ideal and the sample
-    let loss = mse(&sample_three, &ideal_seven).unwrap();
-    dbg!(loss);
+    let three_loss = mse(&sample_three, &ideal_three).unwrap();
+    let seven_loss = mse(&sample_seven, &ideal_seven).unwrap();
+    dbg!(three_loss, seven_loss);
 
     Ok(())
 }
