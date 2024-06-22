@@ -1,0 +1,10 @@
+[package]
+name = "digit_classifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
+candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.6.0" }
+image = "0.25.1"
