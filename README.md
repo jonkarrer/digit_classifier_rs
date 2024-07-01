@@ -246,4 +246,132 @@ main() {
 
 ### Baseline Model Conclusion
 
-While impressive we have achieved a 96% accuracy on our baseline model, the machine did not actually learn anything yet. We have simply stacked the cards in our favor, and with some creative math, forced the predictions in our favor. Next, we will leverage Stochastic Gradient Descent to create a better model.
+While impressive we have achieved a 96% accuracy on our baseline model, the machine did not actually learn anything yet. We have simply stacked the cards in our favor, and with some creative math, forced the predictions in our favor. Next, we will leverage Stochastic Gradient Descent to create a learning algorithm.
+
+## Machine Learning
+
+The general idea here is to have a set of randomly assigned weights be adjusted over time to better fit the training data. We can do this by taking a gradient of the loss function with respect to the weights and adjusting them. This is known as gradient descent, and the the basic step in machine learning.
+
+### Data preparation
+
+We need to create some synthetic data and assign a function to fit it to. We will use speed over time for the data, and a quadratic function to fit.
+
+```rust
+// Synthetic training data
+let time = Tensor::arange(1.0, 20.0, &Device::Cpu)?;
+let speed = &Tensor::rand(0.0, 70.0, 19, &Device::Cpu)?;
+
+// Function to fit
+fn quad(time: &Tensor, parameters: &Var) -> anyhow::Result<Tensor> {
+    let a = parameters.get(0)?;
+    let b = parameters.get(1)?;
+    let c = parameters.get(2)?;
+
+    let t_squared = time.powf(2.0)?;
+    let term_1 = a.broadcast_mul(&t_squared)?;
+    let term_2 = b.broadcast_mul(&time)?;
+
+    let res = term_1.add(&term_2)?.broadcast_add(&c)?;
+
+    Ok(res)
+}
+```
+
+### Step: 1. Initialize parameters
+
+Now that we have some data and a function we want to fit, we need to initialize our parameters. We will start with random numbers. This needs to be a `candle_core::Var` with a shape of 3, because a quadratic function has 3 parameters (a, b, c). The `candle_core::Var` type is a wrapper around a `candle_core::Tensor` which allows us to perform optimizations.
+
+```rust
+let params = Var::from_tensor(&Tensor::randn(35.0, 10.0, 3, &Device::Cpu)?)?;
+dbg!(&params);
+// &params = Var(Tensor[33.205258523600044, 49.3967969532341, 30.98702079069388; f64])
+```
+
+### Step: 2. Calculate predictions
+
+The first prediction will be our initial guess. We can use the quadratic function that we created earlier.
+
+```rust
+let predictions = quad(&time, &params)?;
+dbg!(&predictions);
+// The result is our a tensor of 19 predictions, which is the time tensor computed by the quadratic function with our parameters
+// &predictions = Tensor[dims 19; f64]
+```
+
+### Step: 3. Calculate loss
+
+Now that we have an initial guess, we need to calculate the loss. We will use the mean squared error and our target data, the speed data.
+
+```rust
+let loss = mse(&predictions, &speed)?;
+dbg!(&loss);
+// &loss = Tensor[39060063.961310595; f64]
+```
+
+### Step: 4. Calculate gradients
+
+We want to improve that loss, or in other words minimize it. The requires an adjustment to our weights (parameters). The main questions in this step are:
+
+- Should we increase or decrease each weight?
+- How fast should that change happen? (slope)
+- How big should the change be each step? (learning rate)
+
+Lucky for us, gradients are here to answer these questions. We can calculate the gradient by taking the derivative of the loss with respect to the parameters. The stochastic gradient decent optimizer will do this for us.
+
+```rust
+let mut optimizer = SGD::new(vec![params.clone()], 1e-5)?;
+optimizer.backward_step(&loss)?;
+dbg!(&params);
+// These are the recommended parameters for the next step
+// &params = Var(Tensor[17.9471747078848676, 49.5532602018034, 32.811252036247897; f64])
+```
+
+### Step: 5. Step the weights
+
+All that is left to do is apply this optimizer until our loss is minimized or in a tolerance we choose. We can create a function to do this.
+
+```rust
+fn apply_step(params: &Var, time: &Tensor, speed: &Tensor) -> anyhow::Result<Tensor> {
+    // 2. Calculate predictions
+    let predictions = quad(&time, &params)?;
+
+    // 3. Calculate loss
+    let loss = mse(&predictions, &speed)?;
+
+    // 4. Calculate gradients
+    let mut optimizer = SGD::new(vec![params.clone()], 1e-5)?;
+    optimizer.backward_step(&loss)?;
+
+    Ok(loss)
+}
+```
+
+### Step: 6. Repeat the above steps
+
+We can repeat the above steps until we reach a minimum.
+
+```rust
+for _ in 0..10 {
+    let step_result = apply_step(&params, &time, &speed)?;
+    dbg!(&step_result);
+}
+// &step_result = Tensor[6430591.849329078; f64]
+// &step_result = Tensor[1071402.7588349225; f64]
+// &step_result = Tensor[191184.9124527302; f64]
+// &step_result = Tensor[46609.72251038802; f64]
+// &step_result = Tensor[22859.180629631097; f64]
+// &step_result = Tensor[18953.32350377835; f64]
+// &step_result = Tensor[18306.83181759841; f64]
+// &step_result = Tensor[18195.67193285044; f64]
+// &step_result = Tensor[18172.438579305057; f64]
+// &step_result = Tensor[18163.648274856776; f64]
+```
+
+### Step: 7. Stop
+
+Now we have found the optimal parameters. We can use them to make predictions in the future on our data.
+
+```rust
+dbg!(&params);
+// &params =Var(Tensor[-2.9471747078848676, 46.9932602018034, 30.811252036247897; f64])
+```
