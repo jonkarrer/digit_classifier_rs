@@ -33,50 +33,43 @@ fn main() -> anyhow::Result<()> {
     let stacked_seven_tensor = stack_tensors_on_axis(&sevens_tensor_list, 0);
     dbg!(stacked_three_tensor.shape(), stacked_seven_tensor.shape());
 
-    // // Concat tensors for x axis
+    // Concat tensors for x axis
     let training_set_x = Tensor::cat(&[&stacked_three_tensor, &stacked_seven_tensor], 0)?;
-    dbg!(&training_set_x.shape());
+    dbg!(training_set_x.shape());
 
-    // // Reshape n-dimensional tensor to 2-dimensional tensor
+    // Reshape n-dimensional tensor to 2-dimensional tensor
     let training_set_x = training_set_x.reshape(((), 28 * 28))?;
-    dbg!(&training_set_x.shape());
+    dbg!(training_set_x.shape());
 
-    // // Create target tensor using 1 for 3 and 0 for 7
-    // let mut target_threes: Vec<u8> = vec![1; threes_tensor_list.len()];
-    // let target_sevens: Vec<u8> = vec![0; sevens_tensor_list.len()];
-    // target_threes.extend(target_sevens);
-    // let first_dimension = target_threes.len();
+    // Create target tensor using 1 for 3 and 0 for 7
+    let mut target_threes: Vec<u8> = vec![1; threes_tensor_list.len()];
+    let target_sevens: Vec<u8> = vec![0; sevens_tensor_list.len()];
+    target_threes.extend(target_sevens);
+    let first_dimension = target_threes.len();
 
-    // let training_set_y = Tensor::from_vec(target_threes, &[first_dimension, 1], &device)?;
-    // dbg!(training_set_y.shape());
+    let training_set_y = Tensor::from_vec(target_threes, &[first_dimension, 1], &device)?;
+    dbg!(training_set_y.shape());
 
-    // // Prepare input tensors
-    // let dataset = Dataset {
-    //     training_examples: training_set_x,
-    //     training_results: training_set_y,
-    // };
+    // Prepare input tensors
+    let dataset = Dataset {
+        training_examples: training_set_x,
+        training_results: training_set_y,
+    };
 
     // 1. Initialize parameters (weights and biases)
     // Weights must be the same shape as one index tensor of X. In this case 1 index of X is a 28x28 image tensor. The whole X axis is thousands of images, but we just want to match the size of one.
-    let weights = Var::from_tensor(&Tensor::randn(
-        1.0 as f32,
-        1.0 as f32,
-        (28 * 28, 1),
-        &device,
-    )?)?;
+    let weights = Var::from_tensor(&Tensor::randn(1.0 as f32, 1.0 as f32, 28 * 28, &device)?)?;
     // Bias can just be a random scalar
-    let biases = Var::from_tensor(&Tensor::randn(0.0 as f32, 1.0 as f32, (1, 1), &device)?)?;
-    dbg!(&weights.shape(), &biases.shape());
+    let biases = Var::from_tensor(&Tensor::randn(0.0 as f32, 1.0 as f32, 1, &device)?)?;
 
     // 2. Calculate predictions. The root function here is the linear function, y = wx + b, where w is the weights tensor, x is the input tensor, and b is the bias tensor.
     // The wx multiplication is a matrix multiplication. It's a 28x28 matrix times 28x28 matrix.
-    let prediction = linear_layer(&training_set_x, &weights, &biases)?;
+    let prediction = training_set_x
+        .get_on_dim(0, 0)?
+        .mul(weights.as_tensor())?
+        .sum(0)
+        .add(biases.get(0)?)?;
     dbg!(&prediction);
-    Ok(())
-}
 
-fn linear_layer(inputs: &Tensor, weights: &Var, biases: &Var) -> anyhow::Result<Tensor> {
-    let slope_mul_inputs = inputs.matmul(&weights.as_tensor())?;
-    let add_bias = slope_mul_inputs.broadcast_add(biases.as_tensor())?;
-    Ok(add_bias)
+    Ok(())
 }
