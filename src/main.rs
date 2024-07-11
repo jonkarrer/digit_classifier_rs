@@ -1,11 +1,12 @@
 mod comparing_raw_loss;
+mod simple_linear_model;
 mod simple_sgd_model;
 mod tensor_tools;
 
 use std::ops::{Add, Mul};
 
-use candle_core::{DType, Device, Result, Tensor, Var};
-use candle_nn::{linear, ops::sigmoid, VarBuilder, VarMap};
+use candle_core::{shape, DType, Device, Result, Shape, Tensor};
+use candle_nn::{ops::sigmoid, VarBuilder, VarMap};
 use tensor_tools::{stack_tensors_on_axis, transform_dir_into_tensors};
 
 struct Dataset {
@@ -20,13 +21,28 @@ struct Linear {
 
 impl Linear {
     fn forward(&self, inputs: &Tensor) -> Result<Tensor> {
+        dbg!(&inputs, &inputs.shape());
         let x = inputs.matmul(&self.weights)?;
         x.broadcast_add(&self.bias)
     }
 }
 
+struct Model {
+    layer_one: Linear,
+    layer_two: Linear,
+}
+
+impl Model {
+    fn forward(&self, images: &Tensor) -> Result<Tensor> {
+        let x = self.layer_one.forward(images)?;
+        let x = x.relu()?;
+        let y = self.layer_two.forward(&x);
+        y
+    }
+}
+
 fn main() -> anyhow::Result<()> {
-    let device = Device::Cpu;
+    let device = Device::cuda_if_available(0)?;
 
     // ** 0. Prepare dataset
     // Get the images from the directories and convert them to tensors
@@ -53,35 +69,28 @@ fn main() -> anyhow::Result<()> {
     };
 
     // ** 1. Initialize parameters (weights and biases)
-    // Weights must be the same shape as one indices tensor of X. In this case X[0] is a 784 item vector, [[0-255; 784]].
-    // Rank 2: [[random_num]; 784]
-    let weights = Tensor::randn(0f32, 1.0, (28 * 28, 1), &device)?;
+    // Pass them into a layer one
+    let weights = init_weights(&device, (28 * 28, 100).into())?;
+    let bias = init_bias(&device, (100,).into())?;
+    let layer_one = Linear { weights, bias };
 
-    // Bias can just be a random scalar
-    // [[random_num]]
-    let biases = Tensor::randn(0f32, 1.0, 1, &device)?;
+    // Pass another set into layer two
+    let weights = init_weights(&device, (100, 1).into())?;
+    let bias = init_bias(&device, (1,).into())?;
+    let layer_two = Linear { weights, bias };
 
-    let model = Linear {
-        weights: weights,
-        bias: biases,
+    // Create the model
+    let model = Model {
+        layer_one,
+        layer_two,
     };
 
     // ** 2. Calculate predictions.
-    //The root function here is the linear function, y = wx + b,
-    // Where w is the weights tensor, x is the input tensor, and b is the bias tensor.
-    let _predict_just_one = dataset
-        .training_inputs
-        .get(0)? // Get first row [0-255; 784]
-        .mul(&model.weights.squeeze(1)?)? // Multiply each item by each weight, [0-255; 784] * [random_num; 784]
-        .sum_all() // Sum all the items in the new vector [products; 784] = [scalar]
-        .add(model.bias.get(0)?)?; // Add the bias to the scalar. scalar + bias = [scalar]
-
-    // We can use matrix multiplication to do the same thing, but on each row of the rank 2 tensors.
-    // Weights and inputs are both rank 2, so [[weights]; 784] x [[pixels; 784]; 8752] = [[predictions]; 8752]
     let predictions = model.forward(&dataset.training_inputs)?;
 
     // ** 3. Calculate loss
     let loss = loss_with_sigmoid(&predictions, &dataset.training_labels)?;
+    dbg!(loss);
 
     // ** 4. Optimize loss
 
@@ -102,6 +111,14 @@ fn loss_with_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
         .eq(1f32)?
         .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)?
         .mean(0)
+}
+
+fn init_weights(device: &Device, shape: Shape) -> Result<Tensor> {
+    Tensor::randn(0f32, 1.0, shape, device)
+}
+
+fn init_bias(device: &Device, shape: Shape) -> Result<Tensor> {
+    Tensor::randn(0f32, 1.0, shape, device)
 }
 
 #[cfg(test)]
