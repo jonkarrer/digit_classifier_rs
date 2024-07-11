@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
     // ** 2. Calculate predictions.
     //The root function here is the linear function, y = wx + b,
     // Where w is the weights tensor, x is the input tensor, and b is the bias tensor.
-    let predict_just_one = dataset
+    let _predict_just_one = dataset
         .training_inputs
         .get(0)? // Get first row [0-255; 784]
         .mul(&model.weights.squeeze(1)?)? // Multiply each item by each weight, [0-255; 784] * [random_num; 784]
@@ -80,20 +80,41 @@ fn main() -> anyhow::Result<()> {
     // Weights and inputs are both rank 2, so [[weights]; 784] x [[pixels; 784]; 8752] = [[predictions]; 8752]
     let predictions = model.forward(&dataset.training_inputs)?;
 
-    // 3. Calculate loss
-    let t = Tensor::from_vec(vec![1f32, 0f32, 1f32], &[3], &device)?;
-    let p = Tensor::from_vec(vec![0.9f32, 0.4f32, 0.2f32], &[3], &device)?;
-    let loss = loss(&p, &t, &device)?;
-    dbg!(&loss);
+    // ** 3. Calculate loss
+    let loss = loss_with_sigmoid(&predictions, &dataset.training_labels)?;
+
+    // ** 4. Optimize loss
 
     Ok(())
 }
 
-fn loss(prediction: &Tensor, target: &Tensor, device: &Device) -> Result<Tensor> {
-    // Force into values to be between 0 and 1
-    // let prediction = sigmoid(prediction)?;
+fn _loss_no_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
+    target
+        .eq(1f32)?
+        .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)?
+        .mean(0)
+}
+
+fn loss_with_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
+    let prediction = sigmoid(prediction)?;
 
     target
         .eq(1f32)?
-        .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)
+        .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)?
+        .mean(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_loss() {
+        let device = Device::Cpu;
+        let t = Tensor::from_vec(vec![1f32, 0f32, 1f32], &[3], &device).unwrap();
+        let p = Tensor::from_vec(vec![0.9f32, 0.4f32, 0.2f32], &[3], &device).unwrap();
+        let loss = _loss_no_sigmoid(&p, &t).unwrap();
+        dbg!(&loss);
+        assert!(loss.to_scalar::<f32>().unwrap() == 0.43333333f32);
+    }
 }
