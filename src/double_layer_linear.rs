@@ -1,12 +1,8 @@
-mod comparing_raw_loss;
-mod double_layer_linear;
-mod simple_linear_model;
-mod simple_sgd_model;
-mod tensor_tools;
+#![allow(unused_variables, dead_code)]
 
-use candle_core::{shape, DType, Device, Result, Shape, Tensor};
-use candle_nn::{ops::sigmoid, VarBuilder, VarMap};
-use tensor_tools::{stack_tensors_on_axis, transform_dir_into_tensors};
+use crate::tensor_tools::{stack_tensors_on_axis, transform_dir_into_tensors};
+use candle_core::{Device, Result, Shape, Tensor};
+use candle_nn::ops::sigmoid;
 
 struct Dataset {
     training_inputs: Tensor,
@@ -40,7 +36,7 @@ impl Model {
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn double_layer_linear() -> anyhow::Result<()> {
     let device = Device::cuda_if_available(0)?;
 
     // ** 0. Prepare dataset
