@@ -4,7 +4,7 @@ mod simple_linear_model;
 mod simple_sgd_model;
 mod tensor_tools;
 
-use candle_core::{DType, Device, Result, Shape, Tensor, D};
+use candle_core::{DType, Device, Result, Tensor};
 use candle_nn::{linear, ops::sigmoid, Linear, Module, Optimizer, VarBuilder, VarMap};
 use tensor_tools::{stack_tensors_on_axis, transform_dir_into_tensors};
 
@@ -12,8 +12,8 @@ const IMG_DIM: usize = 28 * 28;
 const RESULTS: usize = 1;
 const LAYER_ONE_OUT_SIZE: usize = 100;
 const LAYER_TWO_OUT_SIZE: usize = 50;
-const LEARNING_RATE: f64 = 0.05;
-const EPOCHS: usize = 15;
+const LEARNING_RATE: f64 = 0.03;
+const EPOCHS: usize = 10;
 
 #[derive(Clone)]
 struct Dataset {
@@ -155,14 +155,34 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let test_three = run_a_final_test(&trained_model, &test_threes)?;
+    println!("Test 3: Model predicts {}", test_three);
+
+    let test_seven = run_a_final_test(&trained_model, &test_sevens)?;
+    println!("Test 7: Model predicts {}", test_seven);
+
     Ok(())
 }
 
-fn _loss_no_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
-    target
-        .eq(1f32)?
-        .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)?
-        .mean(0)
+fn run_a_final_test(trained_model: &Model, test_image: &Tensor) -> Result<String> {
+    let final_result = trained_model.forward(
+        &test_image
+            .reshape(((), 28 * 28))?
+            .get(0)?
+            .unsqueeze(1)?
+            .transpose(0, 1)?,
+    )?;
+
+    let test_probs = sigmoid(&final_result)?;
+    let test_preds = test_probs.ge(0.5)?;
+
+    let res = test_preds.get_on_dim(0, 0)?.to_vec1::<u8>()?[0];
+
+    if res == 1 {
+        Ok("Three".to_string())
+    } else {
+        Ok("Seven".to_string())
+    }
 }
 
 fn loss_with_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
@@ -172,27 +192,4 @@ fn loss_with_sigmoid(prediction: &Tensor, target: &Tensor) -> Result<Tensor> {
         .eq(1f32)?
         .where_cond(&Tensor::ones_like(&target)?.sub(&prediction)?, &prediction)?
         .mean(0)
-}
-
-fn init_weights(device: &Device, shape: Shape) -> Result<Tensor> {
-    Tensor::randn(0f32, 1.0, shape, device)
-}
-
-fn init_bias(device: &Device, shape: Shape) -> Result<Tensor> {
-    Tensor::randn(0f32, 1.0, shape, device)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_loss() {
-        let device = Device::Cpu;
-        let t = Tensor::from_vec(vec![1f32, 0f32, 1f32], &[3], &device).unwrap();
-        let p = Tensor::from_vec(vec![0.9f32, 0.4f32, 0.2f32], &[3], &device).unwrap();
-        let loss = _loss_no_sigmoid(&p, &t).unwrap();
-        dbg!(&loss);
-        assert!(loss.to_scalar::<f32>().unwrap() == 0.43333333f32);
-    }
 }
